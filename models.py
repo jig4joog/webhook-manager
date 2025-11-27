@@ -1,5 +1,6 @@
 from sqlalchemy.orm import relationship, declarative_base
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text, DateTime
+from datetime import datetime
 
 Base = declarative_base()
 
@@ -9,7 +10,9 @@ class GroupService(Base):
     group_id = Column(Integer, ForeignKey('groups.id'))
     service_id = Column(Integer, ForeignKey('services.id'))
     enabled = Column(Boolean, default=True)
-    webhook_url = Column(String)
+    webhook_url = Column(Text)
+    webhook_updated_at = Column(DateTime, nullable=True)
+    status_changed_at = Column(DateTime, nullable=True)
     group = relationship("Group", back_populates="group_services")
     service = relationship("Service", back_populates="group_services")
 
@@ -20,7 +23,7 @@ class Group(Base):
     color = Column(String)
     webhook_footer = Column(String)
     webhook_footer_img = Column(String)
-    webhook_url = Column(String)
+    webhook_url = Column(Text)
     enabled = Column(Boolean, default=True)
     group_services = relationship("GroupService", back_populates="group")
 

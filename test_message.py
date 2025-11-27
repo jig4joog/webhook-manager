@@ -21,41 +21,30 @@ from curl_cffi import requests
 from db import SessionLocal
 from models import Group, Service, GroupService
 
-def send_message_script():
-    message_test = 'test message'
-    for z in c.groups.values():
-        name = z['name']
-        webhook_footer = z['webhook_footer']
-        color = z['color']
-        webhook_footer_img = z['webhook_footer_img']
-        webhook = z['webhook']
-
-        webhook_name = DiscordWebhook(url=webhook, username=name)
-        embed = DiscordEmbed(title="Test Message", description='{}'.format(message_test),color=color)
-
-        embed.set_footer(text=webhook_footer, icon_url=webhook_footer_img)
-
-        webhook_name.add_embed(embed)
-        response = webhook_name.execute(remove_embeds=True)
-
 def send_message_db():
     session = SessionLocal()
-    message_test = 'test message'
-    # Get only enabled subscriptions
+    message_test = "test message"
+
     enabled_links = session.query(GroupService).filter_by(enabled=True).all()
     for link in enabled_links:
         group = link.group
         service = link.service
-        # Customize the message per service if needed
-        webhook_name = DiscordWebhook(url=group.webhook_url, username=group.name)
+
+        # Prefer per-service webhook; fall back to group webhook if None
+        webhook_url = link.webhook_url or group.webhook_url
+        if not webhook_url:
+            continue  # nothing to send to
+
+        webhook = DiscordWebhook(url=webhook_url, username=group.name)
         embed = DiscordEmbed(
             title=f"Test for {service.name} and {group.name}",
             description=message_test,
-            color=group.color
+            color=group.color,
         )
         embed.set_footer(text=group.webhook_footer, icon_url=group.webhook_footer_img)
-        webhook_name.add_embed(embed)
-        response = webhook_name.execute(remove_embeds=True)
+        webhook.add_embed(embed)
+        response = webhook.execute(remove_embeds=True)
+
     session.close()
 
 send_message_db()
