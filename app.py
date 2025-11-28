@@ -1,10 +1,14 @@
 import streamlit as st
 from db import SessionLocal, init_db
 from models import Group, Service, GroupService
-from sqlalchemy import select, update, DateTime
+from sqlalchemy import select, update, DateTime, or_
 from datetime import datetime
 import re
+import csv
+import io
+import requests
 from db_migrate import seed_initial_data   # optional helper
+from check_webhooks import check_all_webhooks
 
 def ensure_db():
     # 1) create tables if needed
@@ -27,13 +31,89 @@ def make_key(name: str) -> str:
     key = re.sub(r'-+', '-', key).strip('-')
     return key
 
+
+def make_group_csv_bytes(group):
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Header row
+    writer.writerow([
+        "group_id",
+        "group_name",
+        "service_id",
+        "service_name",
+        "enabled",
+        "webhook_url",
+        "webhook_updated_at",
+        "status_changed_at",
+    ])
+
+    # Data rows
+    for gs in group.group_services:
+        writer.writerow([
+            group.id,
+            group.name,
+            gs.service_id,
+            gs.service.name,
+            "TRUE" if gs.enabled else "FALSE",
+            gs.webhook_url or "",
+            gs.webhook_updated_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(gs, "webhook_updated_at", None) else "",
+            gs.status_changed_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(gs, "status_changed_at", None) else "",
+        ])
+
+    csv_str = output.getvalue()
+    output.close()
+    return csv_str.encode("utf-8")
+
+st.set_page_config(
+    page_title="Discord Webhook Manager",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 init_db()
 session = SessionLocal()
 
 st.title("Discord Webhook Manager")
 
 def load_and_display_groups():
+    # check_all_webhooks()
+
     groups = session.query(Group).all()
+    groups = (
+        session.query(Group)
+        .order_by(Group.name.asc())
+        .all()
+    )
+
+    st.markdown("### Controls")
+
+    c1, c2, c3 = st.columns([3, 2, 2])
+
+    with c1:
+        query = st.text_input(
+            "Search groups or services",
+            placeholder="Type a group or service name...",
+            key="search_query",
+        ).strip().lower()
+
+    with c2:
+        status_filter = st.selectbox(
+            "Status filter",
+            ["All", "Enabled only", "Disabled only"],
+            key="status_filter",
+        )
+
+    with c3:
+        service_filter = st.selectbox(
+            "Service filter",
+            ["All services"] + sorted({s.name for s in session.query(Service).all()}),
+            key="service_filter",
+        )
+
+    # NEW: load services once, before anything else
+    all_services = session.query(Service).all()
+    all_services = sorted(all_services, key=lambda s: s.name.lower())
 
     for k in ["new_name", "new_color", "new_img"]:
         if k not in st.session_state:
@@ -44,53 +124,241 @@ def load_and_display_groups():
             st.session_state[k] = ""
         st.session_state["clear_new_group_form"] = False
 
-    st.markdown("## Add New Group")
-
-    all_services = session.query(Service).all()
-
-    with st.form("add_group_form"):
-        new_name = st.text_input("Display Name", key="new_name")
-        new_color = st.text_input("Color (hex, e.g. FF0000)", key="new_color")
-        new_img = st.text_input("Footer Image URL", key="new_img")
-
-        mode = st.radio(
-            "Onboard services as:",
-            ["All services", "Choose services later"],
-            horizontal=True,
-            key="new_group_svc_mode",
+    # expander / toggle for advanced controls
+    with st.expander("Advanced actions"):
+        st.checkbox(
+            "Show admin tools",
+            key="show_admin_tools",
+            help="Enable extra delete/disable controls",
         )
 
-        submitted = st.form_submit_button("Create Group")
+    show_tools = st.session_state.get("show_admin_tools", False)
 
-    if submitted and new_name:
-        internal_key = make_key(new_name)
-        footer = f"{new_name} | Developed by bennybags#0344"
-
-        group = Group(
-            name=new_name,
-            color=new_color,
-            webhook_footer=footer,
-            webhook_footer_img=new_img,
-            webhook_url=None,  # no default webhook for the group
-            enabled=True,
+    # 1) HEALTH PANEL GOES HERE
+    broken = session.query(GroupService).filter(
+        or_(
+            GroupService.health_status == "missing",
+            GroupService.health_status == "error",
         )
-        session.add(group)
-        session.commit()
+    ).all()
 
-        if mode == "All services":
-            links = [
-                GroupService(group_id=group.id, service_id=s.id, enabled=False)
-                for s in all_services
-            ]
-            if links:
-                session.add_all(links)
+    if broken:
+        with st.container():
+            st.markdown(
+                """
+                <div style="
+                    background-color:#FEF2F2;
+                    border:1px solid #FCA5A5;
+                    border-radius:8px;
+                    padding:10px 14px;
+                    margin-bottom:16px;
+                ">
+                  <div style="font-weight:600;color:#B91C1C;margin-bottom:4px;">
+                    🚨 Broken webhooks detected
+                  </div>
+                  <div style="font-size:13px;color:#7F1D1D;">
+                    These webhooks failed the last health check. Fix them or remove them.
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            with st.expander(f"Broken webhooks ({len(broken)})", expanded=False):
+                for gs in broken:
+                    ts = gs.health_checked_at.strftime("%Y-%m-%d %H:%M:%S UTC") if gs.health_checked_at else "never"
+                    status_label = gs.health_status or "unknown"
+                    code_label = gs.health_code if gs.health_code is not None else "—"
+
+                    c1, c2, c3 = st.columns([3, 2, 3])
+
+                    with c1:
+                        st.markdown(
+                            f"**{gs.group.name}**  \n"
+                            f"<span style='font-size:12px;color:#6B7280'>{gs.service.name}</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                    with c2:
+                        color = "#B91C1C" if status_label in ("missing", "error") else "#6B7280"
+                        st.markdown(
+                            f"<span style='font-size:12px;"
+                            f"padding:2px 8px;border-radius:999px;"
+                            f"background-color:#FEE2E2;color:{color};'>"
+                            f"{status_label.upper()} &middot; {code_label}"
+                            f"</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                    with c3:
+                        st.markdown(
+                            f"<span style='font-size:12px;color:#6B7280'>"
+                            f"Last checked: {ts}"
+                            f"</span>",
+                            unsafe_allow_html=True,
+                        )
+
+                    st.markdown("<hr style='margin:6px 0 8px 0;'>", unsafe_allow_html=True)
+
+    # Service Overview (put this after all_services is defined)
+    st.markdown("## Service Overview")
+
+    service_rows = []
+    for svc in all_services:
+        total_links = len(svc.group_services)
+        enabled_links = sum(1 for gs in svc.group_services if gs.enabled)
+        service_rows.append((svc, total_links, enabled_links))
+
+    for svc, total_links, enabled_links in service_rows:
+        enabled_badge = f"{enabled_links}/{total_links} active" if total_links else "0 routed"
+        status_color = "#16a34a" if enabled_links else "#6b7280"
+
+        left, right = st.columns([4, 1])
+
+        with left:
+            st.markdown(
+                f"""
+                <div style="
+                    border: 1px solid #e5e7eb;
+                    border-radius: 6px;
+                    padding: 8px 10px;
+                    margin-bottom: 4px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    font-size: 13px;
+                ">
+                  <div>
+                    <div style="font-weight: 600;">{svc.name}</div>
+                    <div style="color: #6b7280;">
+                      Linked groups: <b>{total_links}</b>
+                    </div>
+                  </div>
+                  <div style="
+                      padding: 2px 8px;
+                      border-radius: 999px;
+                      background-color: {status_color};
+                      color: white;
+                      font-size: 12px;
+                  ">
+                    {enabled_badge}
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with right:
+            confirm_key = f"confirm_delete_service_links_{svc.id}"
+
+            if st.button("Delete links", key=f"delete_service_links_{svc.id}"):
+                st.session_state[confirm_key] = True
+
+        if st.session_state.get(confirm_key):
+            st.warning(f"Remove **all links** for {svc.name}? This detaches it from every group.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Yes, delete all", key=f"yes_{confirm_key}"):
+                    for gs in list(svc.group_services):
+                        session.delete(gs)
+                    session.commit()
+                    st.session_state[confirm_key] = False
+                    st.rerun()
+            with c2:
+                if st.button("Cancel", key=f"no_{confirm_key}"):
+                    st.session_state[confirm_key] = False
+
+    if show_tools:
+        st.markdown("## Manage Services")
+
+        with st.form("add_service_form"):
+            new_service_name = st.text_input("New service name")
+            add_service_submitted = st.form_submit_button("Add service")
+
+        if add_service_submitted and new_service_name:
+            # Only create if not already present
+            existing = session.query(Service).filter(Service.name == new_service_name).first()
+            if existing is None:
+                session.add(Service(name=new_service_name))
                 session.commit()
+                st.success(f"Service '{new_service_name}' added.")
+                st.rerun()
+            else:
+                st.warning("Service with that name already exists.")
 
-        st.session_state["clear_new_group_form"] = True
-        st.success("New group created.")
-        st.rerun()
+        all_services = session.query(Service).all()
+        st.write("Existing services:", ", ".join(sorted((s.name for s in all_services))))
+
+        st.markdown("## Add New Group")
+
+        all_services = session.query(Service).all()
+
+        with st.form("add_group_form"):
+            new_name = st.text_input("Display Name", key="new_name")
+            new_color = st.text_input("Color (hex, e.g. FF0000)", key="new_color")
+            new_img = st.text_input("Footer Image URL", key="new_img")
+
+            mode = st.radio(
+                "Onboard services as:",
+                ["All services", "Choose services later"],
+                horizontal=True,
+                key="new_group_svc_mode",
+            )
+
+            submitted = st.form_submit_button("Create Group")
+
+        if submitted and new_name:
+            internal_key = make_key(new_name)
+            footer = f"{new_name} | Developed by bennybags#0344"
+
+            group = Group(
+                name=new_name,
+                color=new_color,
+                webhook_footer=footer,
+                webhook_footer_img=new_img,
+                webhook_url=None,  # no default webhook for the group
+                enabled=True,
+            )
+            session.add(group)
+            session.commit()
+
+            if mode == "All services":
+                links = [
+                    GroupService(group_id=group.id, service_id=s.id, enabled=False)
+                    for s in all_services
+                ]
+                if links:
+                    session.add_all(links)
+                    session.commit()
+
+            st.session_state["clear_new_group_form"] = True
+            st.success("New group created.")
+            st.rerun()
+
+    filtered_groups = []
 
     for group in groups:
+        # text match: group name OR any service name
+        names = [group.name.lower()] + [gs.service.name.lower() for gs in group.group_services]
+        if query and not any(query in n for n in names):
+            continue
+
+        # status filter: treat group as enabled if any linked service is enabled
+        any_enabled = any(gs.enabled for gs in group.group_services)
+
+        if status_filter == "Enabled only" and not any_enabled:
+            continue
+        if status_filter == "Disabled only" and any_enabled:
+            continue
+
+        # service filter: keep only groups that have that service linked
+        if service_filter != "All services":
+            if not any(gs.service.name == service_filter for gs in group.group_services):
+                continue
+
+        filtered_groups.append(group)
+
+    for group in filtered_groups:
 
         # This is the expander code
         with st.expander(f"{group.name} (ID {group.id})", expanded=False):
@@ -116,6 +384,16 @@ def load_and_display_groups():
                 """,
                 unsafe_allow_html=True,
             )
+
+            # NEW: group-level toggle
+            group_toggle_label = "Disable all services" if any_enabled else "Enable all services"
+            if st.button(group_toggle_label, key=f"group_toggle_{group.id}"):
+                now = datetime.utcnow()
+                for gs in group.group_services:
+                    gs.enabled = not any_enabled  # flip all to the opposite
+                    gs.status_changed_at = now
+                session.commit()
+                st.rerun()
 
             #Add Services to this group section
             all_services = session.query(Service).all()
@@ -168,14 +446,68 @@ def load_and_display_groups():
                     else:
                         st.info("No services selected.")
 
+            csv_bytes = make_group_csv_bytes(group)
+            st.download_button(
+                label="Export group to CSV",
+                data=csv_bytes,
+                file_name=f"group_{group.id}_{group.name}.csv",
+                mime="text/csv",
+                key=f"export_group_{group.id}",
+            )
+
+            settings_key = f"show_group_settings_{group.id}"
+            with st.expander(f"Group settings for {group.name}", expanded=False):
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    new_name = st.text_input(
+                        "Display name",
+                        value=group.name,
+                        key=f"name_{group.id}",
+                    )
+                    new_color = st.text_input(
+                        "Color (hex, e.g. FF0000)",
+                        value=group.color or "",
+                        key=f"color_{group.id}",
+                    )
+
+                with col2:
+                    new_img = st.text_input(
+                        "Footer image URL",
+                        value=group.webhook_footer_img or "",
+                        key=f"img_{group.id}",
+                    )
+                    # if group.webhook_footer_img:
+                    #     st.image(group.webhook_footer_img, width=80, caption="Current footer image")
+
+                # last updated timestamp
+                if getattr(group, "updated_at", None):
+                    st.caption(f"Last updated: {group.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+                if st.button("Save group settings", key=f"save_group_{group.id}"):
+                    group.name = new_name.strip()
+                    group.color = new_color.strip() or None
+                    group.webhook_footer_img = new_img.strip() or None
+                    session.commit()
+                    st.rerun()
+
             #Services and Markdowns
             st.markdown(f"<h2 style='margin-bottom:0'>{group.name}</h2>", unsafe_allow_html=True)
             st.markdown("#### Services:")
 
+            # sort links for this group by service name (A→Z)
+            sorted_links = sorted(
+                group.group_services,
+                key=lambda gs: gs.service.name.lower()
+            )
+
             # for gs in group.group_services:
-            for i, gs in enumerate(group.group_services):
+            for i, gs in enumerate(sorted_links):
+
                 # 4 columns: name | status | toggle | webhook update stuff
-                cols = st.columns([2, 1, 1, 3])
+                cols = st.columns([1, 1, 1, 3, 0.6])
+
                 #Service name
                 with cols[0]:
                     st.markdown(f"**{gs.service.name}**")
@@ -235,22 +567,61 @@ def load_and_display_groups():
                         c1, c2 = st.columns(2)
                         with c1:
                             if st.button("Confirm change", key=f"confirm_{group.id}_{gs.service.id}"):
-                                gs.webhook_url = st.session_state[pending_key]
-                                gs.webhook_updated_at = datetime.utcnow()
-                                session.commit()
-                                st.session_state[pending_key] = ""
-                                st.success("Webhook updated.")
-                                st.rerun()
+                                new_url = st.session_state[pending_key].strip()
+
+                                try:
+                                    resp = requests.get(new_url, timeout=5)
+                                    code = resp.status_code
+
+                                    if 200 <= code < 300:
+                                        # valid -> save to DB and mark health
+                                        gs.webhook_url = new_url
+                                        gs.webhook_updated_at = datetime.utcnow()
+                                        gs.health_status = "ok"
+                                        gs.health_code = code
+                                        gs.health_checked_at = datetime.utcnow()
+
+                                        session.commit()
+                                        st.session_state[pending_key] = ""
+                                        st.success(f"Webhook updated and looks valid (HTTP {code}).")
+                                        st.rerun()
+                                    elif code in (401, 404):
+                                        st.error(
+                                            f"Discord returned {code}: webhook appears invalid or deleted. Not saved.")
+                                    else:
+                                        st.error(f"Discord returned HTTP {code}. Not saving this URL.")
+                                except Exception:
+                                    st.error("Error reaching Discord; webhook not saved.")
+
                         with c2:
-                            if st.button(
-                                    "Cancel",
-                                    key=f"cancel_{group.id}_{gs.service.id}",
-                            ):
+                            if st.button("Cancel", key=f"cancel_{group.id}_{gs.service.id}"):
                                 st.session_state[pending_key] = ""
+
+                # delete this service from this group
+                with cols[4]:
+                    confirm_key = f"confirm_delete_link_{group.id}_{gs.service.id}"
+
+                    if st.button("🗑️", key=f"delete_link_{group.id}_{gs.service.id}"):
+                        st.session_state[confirm_key] = True
+
+                if st.session_state.get(confirm_key):
+                    st.warning("Remove this service from this group?")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("Yes, delete", key=f"yes_{confirm_key}"):
+                            session.delete(gs)
+                            session.commit()
+                            st.session_state[confirm_key] = False
+                            st.rerun()
+                    with c2:
+                        if st.button("Cancel", key=f"no_{confirm_key}"):
+                            st.session_state[confirm_key] = False
+
 
 # .venv\Scripts\Activate
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 # streamlit run app.py
+# broken url = 'https://discord.com/api/webhooks/1444080766140022814/pEKP8d0-Vh1zydGTl9Idz375b8D1hpDgzFyv6x9lHX4I2_m072FQLBKIpruz46FrMTKS'
 
 if __name__ == "__main__":
     load_and_display_groups()

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import relationship, declarative_base
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text, DateTime, func
 from datetime import datetime
 
 Base = declarative_base()
@@ -13,6 +13,9 @@ class GroupService(Base):
     webhook_url = Column(Text)
     webhook_updated_at = Column(DateTime, nullable=True)
     status_changed_at = Column(DateTime, nullable=True)
+    health_status = Column(String, default="unknown")   # ok, missing, error
+    health_code = Column(Integer, nullable=True)        # HTTP status
+    health_checked_at = Column(DateTime, nullable=True)
     group = relationship("Group", back_populates="group_services")
     service = relationship("Service", back_populates="group_services")
 
@@ -25,6 +28,7 @@ class Group(Base):
     webhook_footer_img = Column(String)
     webhook_url = Column(Text)
     enabled = Column(Boolean, default=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     group_services = relationship("GroupService", back_populates="group")
 
 class Service(Base):
