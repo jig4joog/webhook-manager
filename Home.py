@@ -203,71 +203,72 @@ def load_and_display_groups():
 
     # Service Overview (put this after all_services is defined)
     st.markdown("## Service Overview")
+    with st.expander(f"Services", expanded=False):
 
-    service_rows = []
-    for svc in all_services:
-        total_links = len(svc.group_services)
-        enabled_links = sum(1 for gs in svc.group_services if gs.enabled)
-        service_rows.append((svc, total_links, enabled_links))
+        service_rows = []
+        for svc in all_services:
+            total_links = len(svc.group_services)
+            enabled_links = sum(1 for gs in svc.group_services if gs.enabled)
+            service_rows.append((svc, total_links, enabled_links))
 
-    for svc, total_links, enabled_links in service_rows:
-        enabled_badge = f"{enabled_links}/{total_links} active" if total_links else "0 routed"
-        status_color = "#16a34a" if enabled_links else "#6b7280"
+        for svc, total_links, enabled_links in service_rows:
+            enabled_badge = f"{enabled_links}/{total_links} active" if total_links else "0 routed"
+            status_color = "#16a34a" if enabled_links else "#6b7280"
 
-        left, right = st.columns([4, 1])
+            left, right = st.columns([4, 1])
 
-        with left:
-            st.markdown(
-                f"""
-                <div style="
-                    border: 1px solid #e5e7eb;
-                    border-radius: 6px;
-                    padding: 8px 10px;
-                    margin-bottom: 4px;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    font-size: 13px;
-                ">
-                  <div>
-                    <div style="font-weight: 600;">{svc.name}</div>
-                    <div style="color: #6b7280;">
-                      Linked groups: <b>{total_links}</b>
+            with left:
+                st.markdown(
+                    f"""
+                    <div style="
+                        border: 1px solid #e5e7eb;
+                        border-radius: 6px;
+                        padding: 8px 10px;
+                        margin-bottom: 4px;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        font-size: 13px;
+                    ">
+                      <div>
+                        <div style="font-weight: 600;">{svc.name}</div>
+                        <div style="color: #6b7280;">
+                          Linked groups: <b>{total_links}</b>
+                        </div>
+                      </div>
+                      <div style="
+                          padding: 2px 8px;
+                          border-radius: 999px;
+                          background-color: {status_color};
+                          color: white;
+                          font-size: 12px;
+                      ">
+                        {enabled_badge}
+                      </div>
                     </div>
-                  </div>
-                  <div style="
-                      padding: 2px 8px;
-                      border-radius: 999px;
-                      background-color: {status_color};
-                      color: white;
-                      font-size: 12px;
-                  ">
-                    {enabled_badge}
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-        with right:
-            confirm_key = f"confirm_delete_service_links_{svc.id}"
+            with right:
+                confirm_key = f"confirm_delete_service_links_{svc.id}"
 
-            if st.button("Delete links", key=f"delete_service_links_{svc.id}"):
-                st.session_state[confirm_key] = True
+                if st.button("Delete links", key=f"delete_service_links_{svc.id}"):
+                    st.session_state[confirm_key] = True
 
-        if st.session_state.get(confirm_key):
-            st.warning(f"Remove **all links** for {svc.name}? This detaches it from every group.")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Yes, delete all", key=f"yes_{confirm_key}"):
-                    for gs in list(svc.group_services):
-                        session.delete(gs)
-                    session.commit()
-                    st.session_state[confirm_key] = False
-                    st.rerun()
-            with c2:
-                if st.button("Cancel", key=f"no_{confirm_key}"):
-                    st.session_state[confirm_key] = False
+            if st.session_state.get(confirm_key):
+                st.warning(f"Remove **all links** for {svc.name}? This detaches it from every group.")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Yes, delete all", key=f"yes_{confirm_key}"):
+                        for gs in list(svc.group_services):
+                            session.delete(gs)
+                        session.commit()
+                        st.session_state[confirm_key] = False
+                        st.rerun()
+                with c2:
+                    if st.button("Cancel", key=f"no_{confirm_key}"):
+                        st.session_state[confirm_key] = False
 
     if show_tools:
         st.markdown("## Manage Services")
@@ -359,10 +360,14 @@ def load_and_display_groups():
 
         filtered_groups.append(group)
 
+    # Group Overview
+    st.markdown("## Group Overview")
+
     for group in filtered_groups:
 
         # This is the expander code
-        with st.expander(f"{group.name} (ID {group.id})", expanded=False):
+        with st.expander(f"{group.name}", expanded=False):
+            st.caption(f"Group ID: {group.id}")
             any_enabled = any(gs.enabled for gs in group.group_services)
             status_text = "Enabled" if any_enabled else "Disabled"
             bar_color = "16a34a" if any_enabled else "dc2626"  # green / red
@@ -621,7 +626,7 @@ def load_and_display_groups():
 
 # .venv\Scripts\Activate
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-# streamlit run app.py
+# streamlit run home.py
 # broken url = 'https://discord.com/api/webhooks/1444080766140022814/pEKP8d0-Vh1zydGTl9Idz375b8D1hpDgzFyv6x9lHX4I2_m072FQLBKIpruz46FrMTKS'
 
 if __name__ == "__main__":
