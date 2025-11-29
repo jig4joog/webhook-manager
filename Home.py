@@ -66,6 +66,24 @@ def make_group_csv_bytes(group):
     output.close()
     return csv_str.encode("utf-8")
 
+def send_discord_message(webhook_url: str, content: str, username: str | None = None):
+    if not webhook_url or not content:
+        return
+
+    data = {
+        "content": content,
+    }
+    if username:
+        data["username"] = username
+
+    try:
+        resp = requests.post(webhook_url, json=data, timeout=5)
+        # Discord usually returns 204 for success
+        if not (200 <= resp.status_code < 300):
+            print(f"Discord webhook error {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Failed to send Discord webhook: {e}")
+
 st.set_page_config(
     page_title="Discord Webhook Manager",
     layout="wide",
@@ -396,8 +414,15 @@ def load_and_display_groups():
             if st.button(group_toggle_label, key=f"group_toggle_{group.id}"):
                 now = datetime.utcnow()
                 for gs in group.group_services:
+
                     gs.enabled = not any_enabled  # flip all to the opposite
                     gs.status_changed_at = now
+                    if not gs.enabled:
+                        send_discord_message(
+                            gs.webhook_url,
+                            f"Service Announcement\n\n🔕 Webhook disabled for **{gs.group.name} / {gs.service.name}**.\n\nPlease contact your provider (bennybags#0344) to re-enable services.",
+                            username="Webhook Manager",
+                        )
                 session.commit()
                 st.rerun()
 
