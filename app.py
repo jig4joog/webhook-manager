@@ -9,6 +9,7 @@ import io
 import requests
 from db_migrate import seed_initial_data   # optional helper
 from check_webhooks import check_all_webhooks
+import pandas as pd
 
 def ensure_db():
     # 1) create tables if needed
