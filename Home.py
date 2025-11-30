@@ -96,7 +96,7 @@ session = SessionLocal()
 st.title("Discord Webhook Manager")
 
 def load_and_display_groups():
-    # check_all_webhooks()
+    check_all_webhooks()
 
     groups = session.query(Group).all()
     groups = (
@@ -154,12 +154,17 @@ def load_and_display_groups():
     show_tools = st.session_state.get("show_admin_tools", False)
 
     # 1) HEALTH PANEL GOES HERE
-    broken = session.query(GroupService).filter(
-        or_(
-            GroupService.health_status == "missing",
-            GroupService.health_status == "error",
+    broken = (
+        session.query(GroupService)
+        .filter(
+            GroupService.enabled.is_(True),
+            or_(
+                GroupService.health_status == "missing",
+                GroupService.health_status == "error",
+            )
         )
-    ).all()
+        .all()
+    )
 
     if broken:
         with st.container():
@@ -386,7 +391,7 @@ def load_and_display_groups():
 
         # This is the expander code
         with st.expander(f"{group.name}", expanded=False):
-            st.caption(f"Group ID: {group.id}")
+            st.caption(f"Group ID: {group.id} | Group Caption: {group.caption}")
             any_enabled = any(gs.enabled for gs in group.group_services)
             status_text = "Enabled" if any_enabled else "Disabled"
             bar_color = "16a34a" if any_enabled else "dc2626"  # green / red
@@ -583,7 +588,8 @@ def load_and_display_groups():
 
                     pending_key = f"pending_webhook_{group.id}_{gs.service.id}"
 
-                    # Form to edit the URL (stage change only)
+                    confirm_key = f"confirm_clear_{group.id}_{gs.service.id}"
+
                     with st.form(key=f"webhook_form_{group.id}_{gs.service.id}"):
                         updated_url = st.text_input(
                             "Webhook URL",
@@ -592,9 +598,28 @@ def load_and_display_groups():
                             placeholder="https://discord.com/api/webhooks/...",
                         )
 
-                        if st.form_submit_button("Update Webhook"):
-                            # Store proposed value, but do NOT write to DB yet
+                        col_u, col_r = st.columns([2, 2])
+                        with col_u:
+                            update_clicked = st.form_submit_button("Update Webhook")
+                        with col_r:
+                            remove_clicked = st.form_submit_button("Remove webhook")
+
+                        # Handle update
+                        if update_clicked:
                             st.session_state[pending_key] = updated_url
+
+                        # Handle remove with double confirmation
+                        if remove_clicked:
+                            if not st.session_state.get(confirm_key, False):
+                                st.session_state[confirm_key] = True
+                                st.warning("Click 'Remove webhook' again to confirm.")
+                            else:
+                                gs.webhook_url = None
+                                gs.health_status = "unconfigured"  # or your chosen state
+                                gs.webhook_updated_at = None
+                                session.commit()
+                                st.success("Webhook removed.")
+                                st.session_state[confirm_key] = False
 
                     # If there is a pending change, show confirmation UI
                     if pending_key in st.session_state and st.session_state[pending_key]:
