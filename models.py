@@ -16,6 +16,7 @@ class GroupService(Base):
     health_status = Column(String, default="unknown")   # ok, missing, error
     health_code = Column(Integer, nullable=True)        # HTTP status
     health_checked_at = Column(DateTime, nullable=True)
+    caption = Column(Text)
     group = relationship("Group", back_populates="group_services")
     service = relationship("Service", back_populates="group_services")
 
@@ -29,6 +30,7 @@ class Group(Base):
     webhook_url = Column(Text)
     enabled = Column(Boolean, default=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    caption = Column(Text)
     group_services = relationship("GroupService", back_populates="group")
 
 class Service(Base):
