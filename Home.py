@@ -317,7 +317,7 @@ def load_and_display_groups():
             new_name = st.text_input("Display Name", key="new_name")
             new_color = st.text_input("Color (hex, e.g. FF0000)", key="new_color")
             new_img = st.text_input("Footer Image URL", key="new_img")
-
+            new_caption = st.text_input("Caption / notes", key="new_caption",placeholder="e.g. Friends group, Members only, etc.")
             mode = st.radio(
                 "Onboard services as:",
                 ["All services", "Choose services later"],
@@ -338,6 +338,7 @@ def load_and_display_groups():
                 webhook_footer_img=new_img,
                 webhook_url=None,  # no default webhook for the group
                 enabled=True,
+                caption=new_caption,
             )
             session.add(group)
             session.commit()
@@ -509,6 +510,11 @@ def load_and_display_groups():
                         value=group.webhook_footer_img or "",
                         key=f"img_{group.id}",
                     )
+                    new_caption = st.text_input(
+                        "Caption / notes",
+                        value=group.caption or "",
+                        key=f"caption_{group.id}",
+                    )
                     # if group.webhook_footer_img:
                     #     st.image(group.webhook_footer_img, width=80, caption="Current footer image")
 
@@ -520,6 +526,7 @@ def load_and_display_groups():
                     group.name = new_name.strip()
                     group.color = new_color.strip() or None
                     group.webhook_footer_img = new_img.strip() or None
+                    group.caption = new_caption.strip() or None
                     session.commit()
                     st.rerun()
 
