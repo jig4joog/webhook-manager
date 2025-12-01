@@ -270,7 +270,7 @@ def load_and_display_groups():
     with c3:
         service_filter = st.selectbox(
             "Service filter",
-            ["All services"] + all_services,
+            ["All services"] + [s.name for s in all_services],
             key="service_filter",
         )
 
@@ -488,21 +488,50 @@ def load_and_display_groups():
             )
 
             # NEW: group-level toggle
+            # 1. Logic to determine label
             group_toggle_label = "Disable all services" if any_enabled else "Enable all services"
-            if st.button(group_toggle_label, key=f"group_toggle_{group.id}"):
-                now = datetime.utcnow()
-                for gs in group.group_services:
-                    # render_service_row(gs)
-                    gs.enabled = not any_enabled  # flip all to the opposite
-                    gs.status_changed_at = now
-                    if not gs.enabled:
-                        send_discord_message(
-                            gs.webhook_url,
-                            f"Service Announcement\n\n🔕 Webhook disabled for **{gs.group.name} / {gs.service.name}**.\n\nPlease contact your provider (bennybags#0344) to re-enable services.",
-                            username="Webhook Manager",
-                        )
-                session.commit()
-                st.rerun()
+
+            # 2. Define a unique key for this group's confirmation state
+            confirm_key = f"confirm_toggle_all_{group.id}"
+
+            # 3. Main Trigger Button
+            if st.button(group_toggle_label, key=f"group_toggle_btn_{group.id}"):
+                st.session_state[confirm_key] = True
+
+            # 4. Confirmation UI (Only shows if triggered)
+            if st.session_state.get(confirm_key):
+                action_word = "DISABLE" if any_enabled else "ENABLE"
+                st.warning(f"⚠️ Are you sure you want to **{action_word}** all services for **{group.name}**?")
+
+                col_confirm, col_cancel = st.columns(2)
+
+                with col_confirm:
+                    if st.button("Yes, do it", key=f"yes_toggle_{group.id}"):
+                        # --- EXECUTE LOGIC ---
+                        now = datetime.utcnow()
+                        for gs in group.group_services:
+                            gs.enabled = not any_enabled  # flip to opposite
+                            gs.status_changed_at = now
+
+                            # Optional: Send Discord notification if disabling
+                            if not gs.enabled and gs.webhook_url:
+                                send_discord_message(
+                                    gs.webhook_url,
+                                    f"Service Announcement\n\n🔕 Webhook disabled for **{gs.group.name} / {gs.service.name}**.\n\nPlease contact your provider (bennybags#0344) to re-enable services.",
+                                    username="Webhook Manager"
+                                )
+
+                        session.commit()
+
+                        # Cleanup state and refresh
+                        st.session_state[confirm_key] = False
+                        st.success(f"All services {action_word.lower()}d.")
+                        st.rerun()
+
+                with col_cancel:
+                    if st.button("Cancel", key=f"no_toggle_{group.id}"):
+                        st.session_state[confirm_key] = False
+                        st.rerun()
 
             #Add Services to this group section
             # all_services = session.query(Service).all()
@@ -580,6 +609,11 @@ def load_and_display_groups():
                         value=group.color or "",
                         key=f"color_{group.id}",
                     )
+                    new_footer = st.text_input(
+                        "Footer (| Developed by bennybags#0344)",
+                        value=group.webhook_footer or "",
+                        key=f"webook_footer{group.id}",
+                    )
 
                 with col2:
                     new_img = st.text_input(
@@ -601,6 +635,7 @@ def load_and_display_groups():
 
                 if st.button("Save group settings", key=f"save_group_{group.id}"):
                     group.name = new_name.strip()
+                    group.webhook_footer = new_footer.strip()
                     group.color = new_color.strip() or None
                     group.webhook_footer_img = new_img.strip() or None
                     group.caption = new_caption.strip() or None

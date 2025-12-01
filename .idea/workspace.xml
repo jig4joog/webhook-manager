@@ -4,6 +4,7 @@
     <list default="true" id="3bddd024-76a3-44bc-bb08-5d99652cc852" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Home.py" beforeDir="false" afterPath="$PROJECT_DIR$/Home.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/check_db.py" beforeDir="false" afterPath="$PROJECT_DIR$/check_db.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pages/1_Group_Service_Matrix.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/1_Group_Service_Matrix.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -38,7 +39,7 @@
     &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
 }</component>
-  <component name="RunManager" selected="Python.Home">
+  <component name="RunManager" selected="Python.check_db">
     <configuration name="Home" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="webhook_manager" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -84,6 +85,27 @@
         <option name="useCurrentConnection" value="false" />
       </EXTENSION>
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/add_db.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="check_db" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="webhook_manager" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/check_db.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -173,12 +195,14 @@
     <list>
       <item itemvalue="Python.check_webhooks" />
       <item itemvalue="Python.Home" />
+      <item itemvalue="Python.check_db" />
       <item itemvalue="Python.models" />
       <item itemvalue="Python.add_db" />
       <item itemvalue="Python.db" />
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.check_db" />
         <item itemvalue="Python.db" />
         <item itemvalue="Python.models" />
         <item itemvalue="Python.add_db" />
