@@ -10,21 +10,33 @@ import requests
 from db_migrate import seed_initial_data   # optional helper
 from check_webhooks import check_all_webhooks
 import pandas as pd
+from sqlalchemy.orm import joinedload
+import time
 
-def ensure_db():
-    # 1) create tables if needed
+# start_time = time.time()
+# st.write(f"Script start: 0s")
+@st.cache_resource
+def get_db_connection():
+    """
+    Creates the DB engine and checks tables ONLY ONCE.
+    Streamlit will keep this result in memory, so clicking buttons
+    won't trigger a 2-second database handshake.
+    """
+    # 1. Create tables (expensive operation)
     init_db()
 
-    # 2) optional: if this is a fresh DB, seed it once
-    session = SessionLocal()
-    has_groups = session.query(Group).first() is not None
-    if not has_groups:
-        # call a seed function or inline your seeding logic here
-        seed_initial_data(session)
-        pass
-    session.close()
+    # 2. Seed data if needed
+    db = SessionLocal()
+    try:
+        if not db.query(Group).first():
+            seed_initial_data(db)
+    finally:
+        db.close()
+    return True
 
-ensure_db()
+
+# Initialize once
+get_db_connection()
 
 def make_key(name: str) -> str:
     key = name.strip().lower()
@@ -90,21 +102,153 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-init_db()
+def health_check_button():
+    # Initialize state variable if it doesn't exist
+    if "health_scan_results" not in st.session_state:
+        st.session_state["health_scan_results"] = None
+
+    st.markdown("### Health Check")
+
+    col_scan, col_clear = st.columns([2, 5])
+
+    with col_scan:
+        # The button to trigger the DB query
+        if st.button("🔍 Scan for broken webhooks"):
+            check_all_webhooks()
+
+            with st.spinner("Checking database records..."):
+                # Run the query ONLY when button is clicked
+                broken_query = (
+                    session.query(GroupService)
+                    .options(
+                        joinedload(GroupService.group),
+                        joinedload(GroupService.service)
+                    )
+                    .filter(
+                        GroupService.enabled.is_(True),
+                        or_(
+                            GroupService.health_status == "missing",
+                            GroupService.health_status == "error",
+                        )
+                    )
+                    .all()
+                )
+
+                # Convert complex DB objects to simple dictionaries for session_state
+                # (This prevents crashes when the DB session closes)
+                results = []
+                for gs in broken_query:
+                    results.append({
+                        "group_name": gs.group.name,
+                        "service_name": gs.service.name,
+                        "status": gs.health_status,
+                        "code": gs.health_code,
+                        "checked_at": gs.health_checked_at
+                    })
+
+                st.session_state["health_scan_results"] = results
+
+                if not results:
+                    st.toast("✅ No broken webhooks found!", icon="🎉")
+
+    # Display the results if they exist in state
+    broken_data = st.session_state["health_scan_results"]
+
+    if broken_data:
+        # Show a "Clear" button to hide the panel
+        with col_clear:
+            if st.button("Clear results"):
+                st.session_state["health_scan_results"] = None
+                st.rerun()
+
+        st.markdown(
+            f"""
+                <div style="
+                    background-color:#FEF2F2;
+                    border:1px solid #FCA5A5;
+                    border-radius:8px;
+                    padding:10px 14px;
+                    margin-bottom:16px;
+                    margin-top: 10px;
+                ">
+                  <div style="font-weight:600;color:#B91C1C;margin-bottom:4px;">
+                    🚨 Found {len(broken_data)} broken webhooks
+                  </div>
+                  <div style="font-size:13px;color:#7F1D1D;">
+                    Based on last known health check.
+                  </div>
+                </div>
+                """,
+            unsafe_allow_html=True,
+        )
+
+        with st.expander(f"View Details ({len(broken_data)})", expanded=True):
+            for item in broken_data:
+                ts = item['checked_at'].strftime("%Y-%m-%d %H:%M:%S UTC") if item['checked_at'] else "never"
+                status_label = item['status'] or "unknown"
+                code_label = item['code'] if item['code'] is not None else "—"
+
+                c1, c2, c3 = st.columns([3, 2, 3])
+
+                with c1:
+                    st.markdown(
+                        f"**{item['group_name']}**  \n"
+                        f"<span style='font-size:12px;color:#6B7280'>{item['service_name']}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                with c2:
+                    color = "#B91C1C"  # Red text
+                    st.markdown(
+                        f"<span style='font-size:12px;"
+                        f"padding:2px 8px;border-radius:999px;"
+                        f"background-color:#FEE2E2;color:{color};'>"
+                        f"{status_label.upper()} &middot; {code_label}"
+                        f"</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                with c3:
+                    st.markdown(
+                        f"<span style='font-size:12px;color:#6B7280'>"
+                        f"Last checked: {ts}"
+                        f"</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown("<hr style='margin:6px 0 8px 0;'>", unsafe_allow_html=True)
+
 session = SessionLocal()
 
 st.title("Discord Webhook Manager")
 
 def load_and_display_groups():
-    # check_all_webhooks()
 
-    groups = session.query(Group).all()
+    health_check_button()
+    # 1. Fetch ALL Services and their links in one go
+    # We use joinedload so counting links in the "Service Overview" doesn't trigger more queries
+    all_services = (
+        session.query(Service)
+        .options(joinedload(Service.group_services))
+        .order_by(Service.name.asc())
+        .all()
+    )
+    # st.write(f"Services loaded: {time.time() - start_time:.2f}s")
+    all_services = sorted(all_services, key=lambda s: s.name.lower())
+
+    # 2. Fetch ALL Groups, their Links, AND the connected Service details in one go
     groups = (
         session.query(Group)
+        .options(
+            # This fetches the Group -> GroupService link
+            joinedload(Group.group_services)
+            # This fetches the GroupService -> Service details
+            .joinedload(GroupService.service)
+        )
         .order_by(Group.name.asc())
         .all()
     )
-
+    # st.write(f"Services loaded: {time.time() - start_time:.2f}s")
     st.markdown("### Controls")
 
     c1, c2, c3 = st.columns([3, 2, 2])
@@ -126,14 +270,11 @@ def load_and_display_groups():
     with c3:
         service_filter = st.selectbox(
             "Service filter",
-            ["All services"] + sorted({s.name for s in session.query(Service).all()}),
+            ["All services"] + all_services,
             key="service_filter",
         )
 
     # NEW: load services once, before anything else
-    all_services = session.query(Service).all()
-    all_services = sorted(all_services, key=lambda s: s.name.lower())
-
     for k in ["new_name", "new_color", "new_img"]:
         if k not in st.session_state:
             st.session_state[k] = ""
@@ -152,77 +293,6 @@ def load_and_display_groups():
         )
 
     show_tools = st.session_state.get("show_admin_tools", False)
-
-    # 1) HEALTH PANEL GOES HERE
-    broken = (
-        session.query(GroupService)
-        .filter(
-            GroupService.enabled.is_(True),
-            or_(
-                GroupService.health_status == "missing",
-                GroupService.health_status == "error",
-            )
-        )
-        .all()
-    )
-
-    if broken:
-        with st.container():
-            st.markdown(
-                """
-                <div style="
-                    background-color:#FEF2F2;
-                    border:1px solid #FCA5A5;
-                    border-radius:8px;
-                    padding:10px 14px;
-                    margin-bottom:16px;
-                ">
-                  <div style="font-weight:600;color:#B91C1C;margin-bottom:4px;">
-                    🚨 Broken webhooks detected
-                  </div>
-                  <div style="font-size:13px;color:#7F1D1D;">
-                    These webhooks failed the last health check. Fix them or remove them.
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            with st.expander(f"Broken webhooks ({len(broken)})", expanded=False):
-                for gs in broken:
-                    ts = gs.health_checked_at.strftime("%Y-%m-%d %H:%M:%S UTC") if gs.health_checked_at else "never"
-                    status_label = gs.health_status or "unknown"
-                    code_label = gs.health_code if gs.health_code is not None else "—"
-
-                    c1, c2, c3 = st.columns([3, 2, 3])
-
-                    with c1:
-                        st.markdown(
-                            f"**{gs.group.name}**  \n"
-                            f"<span style='font-size:12px;color:#6B7280'>{gs.service.name}</span>",
-                            unsafe_allow_html=True,
-                        )
-
-                    with c2:
-                        color = "#B91C1C" if status_label in ("missing", "error") else "#6B7280"
-                        st.markdown(
-                            f"<span style='font-size:12px;"
-                            f"padding:2px 8px;border-radius:999px;"
-                            f"background-color:#FEE2E2;color:{color};'>"
-                            f"{status_label.upper()} &middot; {code_label}"
-                            f"</span>",
-                            unsafe_allow_html=True,
-                        )
-
-                    with c3:
-                        st.markdown(
-                            f"<span style='font-size:12px;color:#6B7280'>"
-                            f"Last checked: {ts}"
-                            f"</span>",
-                            unsafe_allow_html=True,
-                        )
-
-                    st.markdown("<hr style='margin:6px 0 8px 0;'>", unsafe_allow_html=True)
 
     # Service Overview (put this after all_services is defined)
     st.markdown("## Service Overview")
@@ -311,12 +381,12 @@ def load_and_display_groups():
             else:
                 st.warning("Service with that name already exists.")
 
-        all_services = session.query(Service).all()
+        # all_services = session.query(Service).all()
         st.write("Existing services:", ", ".join(sorted((s.name for s in all_services))))
 
         st.markdown("## Add New Group")
 
-        all_services = session.query(Service).all()
+        # all_services = session.query(Service).all()
 
         with st.form("add_group_form"):
             new_name = st.text_input("Display Name", key="new_name")
@@ -388,9 +458,11 @@ def load_and_display_groups():
     st.markdown("## Group Overview")
 
     for group in filtered_groups:
-
+        # st.write(f"Services loaded: {time.time() - start_time:.2f}s")
+        cap = (group.caption or "").strip()
+        label = f"{group.name}" if not cap else f"{group.name} | {cap}"
         # This is the expander code
-        with st.expander(f"{group.name}", expanded=False):
+        with st.expander(label, expanded=False):
             st.caption(f"Group ID: {group.id} | Group Caption: {group.caption}")
             any_enabled = any(gs.enabled for gs in group.group_services)
             status_text = "Enabled" if any_enabled else "Disabled"
@@ -420,7 +492,7 @@ def load_and_display_groups():
             if st.button(group_toggle_label, key=f"group_toggle_{group.id}"):
                 now = datetime.utcnow()
                 for gs in group.group_services:
-
+                    # render_service_row(gs)
                     gs.enabled = not any_enabled  # flip all to the opposite
                     gs.status_changed_at = now
                     if not gs.enabled:
@@ -433,7 +505,7 @@ def load_and_display_groups():
                 st.rerun()
 
             #Add Services to this group section
-            all_services = session.query(Service).all()
+            # all_services = session.query(Service).all()
             st.markdown("### Add services to this group")
 
             mode = st.radio(
@@ -483,14 +555,14 @@ def load_and_display_groups():
                     else:
                         st.info("No services selected.")
 
-            csv_bytes = make_group_csv_bytes(group)
-            st.download_button(
-                label="Export group to CSV",
-                data=csv_bytes,
-                file_name=f"group_{group.id}_{group.name}.csv",
-                mime="text/csv",
-                key=f"export_group_{group.id}",
-            )
+            # csv_bytes = make_group_csv_bytes(group)
+            # st.download_button(
+            #     label="Export group to CSV",
+            #     data=csv_bytes,
+            #     file_name=f"group_{group.id}_{group.name}.csv",
+            #     mime="text/csv",
+            #     key=f"export_group_{group.id}",
+            # )
 
             settings_key = f"show_group_settings_{group.id}"
             with st.expander(f"Group settings for {group.name}", expanded=False):
@@ -547,7 +619,6 @@ def load_and_display_groups():
 
             # for gs in group.group_services:
             for i, gs in enumerate(sorted_links):
-
                 # 4 columns: name | status | toggle | webhook update stuff
                 cols = st.columns([1, 1, 1, 3, 0.6])
 
@@ -680,7 +751,6 @@ def load_and_display_groups():
                         if st.button("Cancel", key=f"no_{confirm_key}"):
                             st.session_state[confirm_key] = False
 
-
 # .venv\Scripts\Activate
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 # $env:DATABASE_URL="postgresql://webhook_config_user:bw5bj1AQ2AuBMf59bhRS5NvPQm3MmAcm@dpg-d4lmlsje5dus73fstta0-a.oregon-postgres.render.com/webhook_config"
@@ -688,4 +758,8 @@ def load_and_display_groups():
 # broken url = 'https://discord.com/api/webhooks/1444080766140022814/pEKP8d0-Vh1zydGTl9Idz375b8D1hpDgzFyv6x9lHX4I2_m072FQLBKIpruz46FrMTKS'
 
 if __name__ == "__main__":
-    load_and_display_groups()
+    try:
+        load_and_display_groups()
+    finally:
+        # Crucial: Always close the connection when the script finishes rendering
+        session.close()
