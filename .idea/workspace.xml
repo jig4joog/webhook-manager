@@ -4,7 +4,6 @@
     <list default="true" id="3bddd024-76a3-44bc-bb08-5d99652cc852" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Home.py" beforeDir="false" afterPath="$PROJECT_DIR$/Home.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/check_webhooks.py" beforeDir="false" afterPath="$PROJECT_DIR$/check_webhooks.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -30,21 +29,21 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "last_opened_file_path": "C:/Users/Sean Wiin/PycharmProjects/pythonProject/webhook_manager",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/Sean Wiin/PycharmProjects/pythonProject/webhook_manager&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
-}]]></component>
+}</component>
   <component name="RunManager" selected="Python.Home">
     <configuration name="Home" type="PythonConfigurationType" factoryName="Python" nameIsGenerated="true">
       <module name="webhook_manager" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
       <envs>
-        <env name="DATABASE_VALUE" value="postgresql://webhook_config_user:bw5bj1AQ2AuBMf59bhRS5NvPQm3MmAcm@dpg-d4lmlsje5dus73fstta0-a.oregon-postgres.render.com/webhook_config" />
+        <env name="DATABASE_URL" value="postgresql://webhook_config_user:bw5bj1AQ2AuBMf59bhRS5NvPQm3MmAcm@dpg-d4lmlsje5dus73fstta0-a.oregon-postgres.render.com/webhook_config" />
       </envs>
       <option name="SDK_HOME" value="" />
       <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
@@ -97,7 +96,6 @@
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
       <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
         <env name="DATABASE_URL" value="postgresql://webhook_config_user:bw5bj1AQ2AuBMf59bhRS5NvPQm3MmAcm@dpg-d4lmlsje5dus73fstta0-a.oregon-postgres.render.com/webhook_config" />
       </envs>
       <option name="SDK_HOME" value="" />
@@ -180,9 +178,9 @@
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.db" />
         <item itemvalue="Python.models" />
         <item itemvalue="Python.add_db" />
-        <item itemvalue="Python.db" />
       </list>
     </recent_temporary>
   </component>

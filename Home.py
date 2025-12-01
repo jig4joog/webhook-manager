@@ -96,7 +96,7 @@ session = SessionLocal()
 st.title("Discord Webhook Manager")
 
 def load_and_display_groups():
-    check_all_webhooks()
+    # check_all_webhooks()
 
     groups = session.query(Group).all()
     groups = (
@@ -683,6 +683,7 @@ def load_and_display_groups():
 
 # .venv\Scripts\Activate
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+# $env:DATABASE_URL="postgresql://webhook_config_user:bw5bj1AQ2AuBMf59bhRS5NvPQm3MmAcm@dpg-d4lmlsje5dus73fstta0-a.oregon-postgres.render.com/webhook_config"
 # streamlit run home.py
 # broken url = 'https://discord.com/api/webhooks/1444080766140022814/pEKP8d0-Vh1zydGTl9Idz375b8D1hpDgzFyv6x9lHX4I2_m072FQLBKIpruz46FrMTKS'
 
