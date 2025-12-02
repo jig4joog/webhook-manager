@@ -29,8 +29,12 @@ try:
     # 3. Process Data
     rows = []
     for gs in results:
+        group_display_name = gs.group.name
+        if gs.group.caption:
+            group_display_name += f" | {gs.group.caption.strip()}"
+        
         rows.append({
-            "Group": gs.group.name,
+            "Group": group_display_name,
             "Service": gs.service.name,
             "Enabled": gs.enabled,
             "Health": gs.health_status or "unknown",

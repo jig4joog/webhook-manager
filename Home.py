@@ -275,7 +275,7 @@ def load_and_display_groups():
             enabled_badge = f"{enabled_links}/{total_links} active" if total_links else "0 routed"
             status_color = "#16a34a" if enabled_links else "#6b7280"
 
-            left, right = st.columns([4, 1])
+            left, right = st.columns([5, 2])
 
             with left:
                 st.markdown(
@@ -311,10 +311,17 @@ def load_and_display_groups():
                 )
 
             with right:
-                confirm_key = f"confirm_delete_service_links_{svc.id}"
-
-                if st.button("Delete links", key=f"delete_service_links_{svc.id}"):
-                    st.session_state[confirm_key] = True
+                b_col1, b_col2 = st.columns(2)
+                with b_col1:
+                    confirm_key = f"confirm_delete_service_links_{svc.id}"
+                    if st.button("Remove links", key=f"delete_service_links_{svc.id}"):
+                        st.session_state[confirm_key] = True
+                
+                if show_tools:
+                    with b_col2:
+                        confirm_key_service = f"confirm_delete_service_{svc.id}"
+                        if st.button("Delete Service", key=f"delete_service_{svc.id}"):
+                            st.session_state[confirm_key_service] = True
 
             if st.session_state.get(confirm_key):
                 st.warning(f"Remove **all links** for {svc.name}? This detaches it from every group.")
@@ -329,6 +336,30 @@ def load_and_display_groups():
                 with c2:
                     if st.button("Cancel", key=f"no_{confirm_key}"):
                         st.session_state[confirm_key] = False
+                        st.rerun()
+
+            if show_tools:
+                confirm_key_del_svc = f"confirm_delete_service_{svc.id}"
+                if st.session_state.get(confirm_key_del_svc):
+                    st.warning(f"⚠️ **PERMANENTLY DELETE** service **{svc.name}** and all its links? This cannot be undone.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("Yes, DELETE", key=f"yes_{confirm_key_del_svc}"):
+                            # First delete all associated links
+                            for gs in list(svc.group_services):
+                                session.delete(gs)
+                            
+                            # Then delete the service itself
+                            session.delete(svc)
+                            session.commit()
+                            
+                            st.session_state[confirm_key_del_svc] = False
+                            st.toast(f"Service '{svc.name}' permanently deleted.", icon="🗑️")
+                            st.rerun()
+                    with c2:
+                        if st.button("Cancel", key=f"no_{confirm_key_del_svc}"):
+                            st.session_state[confirm_key_del_svc] = False
+                            st.rerun()
 
     if show_tools:
         st.markdown("## Manage Services")
