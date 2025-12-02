@@ -1,17 +1,11 @@
-# Virtual environment
-.venv/
-env/ # Just in case you use 'env' instead of '.venv'
+# Environment variables
 .env
 
-# Python cache and temporary files
+# Python artifacts
 __pycache__/
 *.pyc
 
-# Development environment configurations
-.devcontainer/
-
-# Local database files
-# Only use this if your 'webhooks' file is a local SQLite database you don't want committed
-# webhooks
-# *.sqlite3
-webooks.db
+# Virtual environment
+.venv
+venv/
+env/

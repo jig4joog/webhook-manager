@@ -1,4 +1,8 @@
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()  # Loads environment variables from a .env file
+
 from db import SessionLocal, init_db
 from models import Group, Service, GroupService
 from sqlalchemy import select, update, DateTime, or_
@@ -236,44 +240,6 @@ def load_and_display_groups():
     # st.write(f"Services loaded: {time.time() - start_time:.2f}s")
     all_services = sorted(all_services, key=lambda s: s.name.lower())
 
-    # 2. Fetch ALL Groups, their Links, AND the connected Service details in one go
-    groups = (
-        session.query(Group)
-        .options(
-            # This fetches the Group -> GroupService link
-            joinedload(Group.group_services)
-            # This fetches the GroupService -> Service details
-            .joinedload(GroupService.service)
-        )
-        .order_by(Group.name.asc())
-        .all()
-    )
-    # st.write(f"Services loaded: {time.time() - start_time:.2f}s")
-    st.markdown("### Controls")
-
-    c1, c2, c3 = st.columns([3, 2, 2])
-
-    with c1:
-        query = st.text_input(
-            "Search groups or services",
-            placeholder="Type a group or service name...",
-            key="search_query",
-        ).strip().lower()
-
-    with c2:
-        status_filter = st.selectbox(
-            "Status filter",
-            ["All", "Enabled only", "Disabled only"],
-            key="status_filter",
-        )
-
-    with c3:
-        service_filter = st.selectbox(
-            "Service filter",
-            ["All services"] + [s.name for s in all_services],
-            key="service_filter",
-        )
-
     # NEW: load services once, before anything else
     for k in ["new_name", "new_color", "new_img"]:
         if k not in st.session_state:
@@ -431,364 +397,376 @@ def load_and_display_groups():
             st.success("New group created.")
             st.rerun()
 
-    filtered_groups = []
+    # --- NEW GROUP SELECTION ---
+    st.markdown("### Select a Group")
+    # Fetch group objects for the selectbox, which is a fast query
+    groups_for_selection = session.query(Group).order_by(Group.name.asc()).all()
+    # Add a placeholder for the default option
+    group_options = ["-- Select a group to manage --"] + groups_for_selection
 
-    for group in groups:
-        # text match: group name OR any service name
-        names = [group.name.lower()] + [gs.service.name.lower() for gs in group.group_services]
-        if query and not any(query in n for n in names):
-            continue
+    def format_group_for_display(g):
+        if not isinstance(g, Group):
+            return g  # This is for the "-- Select..." placeholder
+        
+        display_text = g.name
+        if g.caption:
+            display_text += f" | {g.caption.strip()}"
+        return display_text
 
-        # status filter: treat group as enabled if any linked service is enabled
-        any_enabled = any(gs.enabled for gs in group.group_services)
+    selected_option = st.selectbox(
+        "Choose a group to view or edit its webhooks",
+        options=group_options,
+        format_func=format_group_for_display,  # Show name and caption
+        key="group_selector",
+    )
 
-        if status_filter == "Enabled only" and not any_enabled:
-            continue
-        if status_filter == "Disabled only" and any_enabled:
-            continue
+    if not isinstance(selected_option, Group):
+        st.info("Select a group from the dropdown above to see its details and manage services.")
+    else:
+        # A group object was selected, so we use its ID to fetch the full details.
+        # This prevents the MultipleResultsFound error if names are duplicated.
+        group = (
+            session.query(Group)
+            .options(
+                # This fetches the Group -> GroupService link
+                joinedload(Group.group_services)
+                # This fetches the GroupService -> Service details
+                .joinedload(GroupService.service)
+            )
+            .filter(Group.id == selected_option.id)
+            .one()
+        )
 
-        # service filter: keep only groups that have that service linked
-        if service_filter != "All services":
-            if not any(gs.service.name == service_filter for gs in group.group_services):
-                continue
+        st.markdown("## Group Details")
 
-        filtered_groups.append(group)
-
-    # Group Overview
-    st.markdown("## Group Overview")
-
-    for group in filtered_groups:
-        # st.write(f"Services loaded: {time.time() - start_time:.2f}s")
         cap = (group.caption or "").strip()
         label = f"{group.name}" if not cap else f"{group.name} | {cap}"
-        # This is the expander code
-        with st.expander(label, expanded=False):
-            st.caption(f"Group ID: {group.id} | Group Caption: {group.caption}")
-            any_enabled = any(gs.enabled for gs in group.group_services)
-            status_text = "Enabled" if any_enabled else "Disabled"
-            bar_color = "16a34a" if any_enabled else "dc2626"  # green / red
+        # Removed expander for each group as only one is displayed
+        st.caption(f"Group ID: {group.id} | Group Caption: {group.caption}")
+        any_enabled = any(gs.enabled for gs in group.group_services)
+        status_text = "Enabled" if any_enabled else "Disabled"
+        bar_color = "16a34a" if any_enabled else "dc2626"  # green / red
 
-            st.markdown(
-                f"""
-                <div style="
-                    background-color: #{bar_color};
-                    color: white;
-                    padding: 6px 10px;
-                    border-radius: 4px;
-                    margin-bottom: 6px;
-                    font-size: 13px;
-                    display: flex;
-                    justify-content: space-between;
-                ">
-                    <span>{group.name}</span>
-                    <span>{status_text}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f"""
+            <div style="
+                background-color: #{bar_color};
+                color: white;
+                padding: 6px 10px;
+                border-radius: 4px;
+                margin-bottom: 6px;
+                font-size: 13px;
+                display: flex;
+                justify-content: space-between;
+            ">
+                <span>{group.name}</span>
+                <span>{status_text}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-            # NEW: group-level toggle
-            # 1. Logic to determine label
-            group_toggle_label = "Disable all services" if any_enabled else "Enable all services"
+        # NEW: group-level toggle
+        # 1. Logic to determine label
+        group_toggle_label = "Disable all services" if any_enabled else "Enable all services"
 
-            # 2. Define a unique key for this group's confirmation state
-            confirm_key = f"confirm_toggle_all_{group.id}"
+        # 2. Define a unique key for this group's confirmation state
+        confirm_key = f"confirm_toggle_all_{group.id}"
 
-            # 3. Main Trigger Button
-            if st.button(group_toggle_label, key=f"group_toggle_btn_{group.id}"):
-                st.session_state[confirm_key] = True
+        # 3. Main Trigger Button
+        if st.button(group_toggle_label, key=f"group_toggle_btn_{group.id}"):
+            st.session_state[confirm_key] = True
 
-            # 4. Confirmation UI (Only shows if triggered)
-            if st.session_state.get(confirm_key):
-                action_word = "DISABLE" if any_enabled else "ENABLE"
-                st.warning(f"⚠️ Are you sure you want to **{action_word}** all services for **{group.name}**?")
+        # 4. Confirmation UI (Only shows if triggered)
+        if st.session_state.get(confirm_key):
+            action_word = "DISABLE" if any_enabled else "ENABLE"
+            st.warning(f"⚠️ Are you sure you want to **{action_word}** all services for **{group.name}**?")
 
-                col_confirm, col_cancel = st.columns(2)
+            col_confirm, col_cancel = st.columns(2)
 
-                with col_confirm:
-                    if st.button("Yes, do it", key=f"yes_toggle_{group.id}"):
-                        # --- EXECUTE LOGIC ---
-                        now = datetime.utcnow()
-                        for gs in group.group_services:
-                            gs.enabled = not any_enabled  # flip to opposite
-                            gs.status_changed_at = now
+            with col_confirm:
+                if st.button("Yes, do it", key=f"yes_toggle_{group.id}"):
+                    # --- EXECUTE LOGIC ---
+                    now = datetime.utcnow()
+                    for gs in group.group_services:
+                        gs.enabled = not any_enabled  # flip to opposite
+                        gs.status_changed_at = now
 
-                            # Optional: Send Discord notification if disabling
-                            if not gs.enabled and gs.webhook_url:
-                                send_discord_message(
-                                    gs.webhook_url,
-                                    f"Service Announcement\n\n🔕 Webhook disabled for **{gs.group.name} / {gs.service.name}**.\n\nPlease contact your provider (bennybags#0344) to re-enable services.",
-                                    username="Webhook Manager"
-                                )
+                        # Optional: Send Discord notification if disabling
+                        if not gs.enabled and gs.webhook_url:
+                            send_discord_message(
+                                gs.webhook_url,
+                                f"Service Announcement\n\n🔕 Webhook disabled for **{gs.group.name} / {gs.service.name}**.\n\nPlease contact your provider (bennybags#0344) to re-enable services.",
+                                username="Webhook Manager"
+                            )
 
-                        session.commit()
-
-                        # Cleanup state and refresh
-                        st.session_state[confirm_key] = False
-                        st.success(f"All services {action_word.lower()}d.")
-                        st.rerun()
-
-                with col_cancel:
-                    if st.button("Cancel", key=f"no_toggle_{group.id}"):
-                        st.session_state[confirm_key] = False
-                        st.rerun()
-
-            #Add Services to this group section
-            # all_services = session.query(Service).all()
-            st.markdown("### Add services to this group")
-
-            mode = st.radio(
-                "How do you want to add services?",
-                ["All services", "Choose services"],
-                key=f"svc_mode_{group.id}",
-                horizontal=True,
-            )
-
-            if mode == "All services":
-                if st.button("Link all services", key=f"link_all_{group.id}"):
-                    existing_ids = {gs.service_id for gs in group.group_services}
-                    new_links = [
-                        GroupService(group_id=group.id, service_id=s.id, enabled=False)
-                        for s in all_services
-                        if s.id not in existing_ids
-                    ]
-                    if new_links:
-                        session.add_all(new_links)
-                        session.commit()
-                        st.success("All services linked to this group.")
-                        st.rerun()
-                    else:
-                        st.info("All services are already linked to this group.")
-            else:
-                # multi-select of services not yet linked
-                existing_ids = {gs.service_id for gs in group.group_services}
-                available = [s for s in all_services if s.id not in existing_ids]
-
-                selected = st.multiselect(
-                    "Select services to add",
-                    options=available,
-                    format_func=lambda s: s.name,
-                    key=f"svc_select_{group.id}",
-                )
-
-                if st.button("Add selected services", key=f"add_selected_{group.id}"):
-                    new_links = [
-                        GroupService(group_id=group.id, service_id=s.id, enabled=False)
-                        for s in selected
-                    ]
-                    if new_links:
-                        session.add_all(new_links)
-                        session.commit()
-                        st.success("Selected services linked.")
-                        st.rerun()
-                    else:
-                        st.info("No services selected.")
-
-            # csv_bytes = make_group_csv_bytes(group)
-            # st.download_button(
-            #     label="Export group to CSV",
-            #     data=csv_bytes,
-            #     file_name=f"group_{group.id}_{group.name}.csv",
-            #     mime="text/csv",
-            #     key=f"export_group_{group.id}",
-            # )
-
-            settings_key = f"show_group_settings_{group.id}"
-            with st.expander(f"Group settings for {group.name}", expanded=False):
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    new_name = st.text_input(
-                        "Display name",
-                        value=group.name,
-                        key=f"name_{group.id}",
-                    )
-                    new_color = st.text_input(
-                        "Color (hex, e.g. FF0000)",
-                        value=group.color or "",
-                        key=f"color_{group.id}",
-                    )
-                    new_footer = st.text_input(
-                        "Footer (| Developed by bennybags#0344)",
-                        value=group.webhook_footer or "",
-                        key=f"webook_footer{group.id}",
-                    )
-
-                with col2:
-                    new_img = st.text_input(
-                        "Footer image URL",
-                        value=group.webhook_footer_img or "",
-                        key=f"img_{group.id}",
-                    )
-                    new_caption = st.text_input(
-                        "Caption / notes",
-                        value=group.caption or "",
-                        key=f"caption_{group.id}",
-                    )
-                    # if group.webhook_footer_img:
-                    #     st.image(group.webhook_footer_img, width=80, caption="Current footer image")
-
-                # last updated timestamp
-                if getattr(group, "updated_at", None):
-                    st.caption(f"Last updated: {group.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-
-                if st.button("Save group settings", key=f"save_group_{group.id}"):
-                    group.name = new_name.strip()
-                    group.webhook_footer = new_footer.strip()
-                    group.color = new_color.strip() or None
-                    group.webhook_footer_img = new_img.strip() or None
-                    group.caption = new_caption.strip() or None
                     session.commit()
+
+                    # Cleanup state and refresh
+                    st.session_state[confirm_key] = False
+                    st.success(f"All services {action_word.lower()}d.")
                     st.rerun()
 
-            #Services and Markdowns
-            st.markdown(f"<h2 style='margin-bottom:0'>{group.name}</h2>", unsafe_allow_html=True)
-            st.markdown("#### Services:")
+            with col_cancel:
+                if st.button("Cancel", key=f"no_toggle_{group.id}"):
+                    st.session_state[confirm_key] = False
+                    st.rerun()
 
-            # sort links for this group by service name (A→Z)
-            sorted_links = sorted(
-                group.group_services,
-                key=lambda gs: gs.service.name.lower()
+        #Add Services to this group section
+        # all_services = session.query(Service).all()
+        st.markdown("### Add services to this group")
+
+        mode = st.radio(
+            "How do you want to add services?",
+            ["All services", "Choose services"],
+            key=f"svc_mode_{group.id}",
+            horizontal=True,
+        )
+
+        if mode == "All services":
+            if st.button("Link all services", key=f"link_all_{group.id}"):
+                existing_ids = {gs.service_id for gs in group.group_services}
+                new_links = [
+                    GroupService(group_id=group.id, service_id=s.id, enabled=False)
+                    for s in all_services
+                    if s.id not in existing_ids
+                ]
+                if new_links:
+                    session.add_all(new_links)
+                    session.commit()
+                    st.success("All services linked to this group.")
+                    st.rerun()
+                else:
+                    st.info("All services are already linked to this group.")
+        else:
+            # multi-select of services not yet linked
+            existing_ids = {gs.service_id for gs in group.group_services}
+            available = [s for s in all_services if s.id not in existing_ids]
+
+            selected = st.multiselect(
+                "Select services to add",
+                options=available,
+                format_func=lambda s: s.name,
+                key=f"svc_select_{group.id}",
             )
 
-            # for gs in group.group_services:
-            for i, gs in enumerate(sorted_links):
-                # 4 columns: name | status | toggle | webhook update stuff
-                cols = st.columns([1, 1, 1, 3, 0.6])
+            if st.button("Add selected services", key=f"add_selected_{group.id}"):
+                new_links = [
+                    GroupService(group_id=group.id, service_id=s.id, enabled=False)
+                    for s in selected
+                ]
+                if new_links:
+                    session.add_all(new_links)
+                    session.commit()
+                    st.success("Selected services linked.")
+                    st.rerun()
+                else:
+                    st.info("No services selected.")
 
-                #Service name
-                with cols[0]:
-                    st.markdown(f"**{gs.service.name}**")
-                    if gs.webhook_updated_at:
-                        st.markdown(
-                            f"<span style='font-size:13px;color:#999'>Last updated: "
-                            f"{gs.webhook_updated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}</span>",
-                            unsafe_allow_html=True,
-                        )
-                #Enable Button
-                with cols[1]:
-                    st.markdown("🟢" if gs.enabled else "🔴")
-                    st.markdown("Enabled" if gs.enabled else "Disabled")
-                    if gs.status_changed_at:
-                        st.markdown(
-                            f"<span style='font-size:11px;color:#999'>"
-                            f"Last change: {gs.status_changed_at.strftime('%Y-%m-%d %H:%M:%S')} UTC"
-                            f"</span>",
-                            unsafe_allow_html=True,
-                        )
-                #Disable Button
-                with cols[2]:
-                    toggle_txt = "Disable" if gs.enabled else "Enable"
-                    if st.button(toggle_txt, key=f"toggle_{group.id}_{gs.service.id}_{gs.enabled}"):
-                        gs.enabled = not gs.enabled
-                        gs.status_changed_at = datetime.utcnow()
-                        session.commit()
-                        st.rerun()
-                #Updating Section
-                with cols[3]:
+        # csv_bytes = make_group_csv_bytes(group)
+        # st.download_button(
+        #     label="Export group to CSV",
+        #     data=csv_bytes,
+        #     file_name=f"group_{group.id}_{group.name}.csv",
+        #     mime="text/csv",
+        #     key=f"export_group_{group.id}",
+        # )
+
+        settings_key = f"show_group_settings_{group.id}"
+        with st.expander(f"Group settings for {group.name}", expanded=False):
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                new_name = st.text_input(
+                    "Display name",
+                    value=group.name,
+                    key=f"name_{group.id}",
+                )
+                new_color = st.text_input(
+                    "Color (hex, e.g. FF0000)",
+                    value=group.color or "",
+                    key=f"color_{group.id}",
+                )
+                new_footer = st.text_input(
+                    "Footer (| Developed by bennybags#0344)",
+                    value=group.webhook_footer or "",
+                    key=f"webook_footer{group.id}",
+                )
+
+            with col2:
+                new_img = st.text_input(
+                    "Footer image URL",
+                    value=group.webhook_footer_img or "",
+                    key=f"img_{group.id}",
+                )
+                new_caption = st.text_input(
+                    "Caption / notes",
+                    value=group.caption or "",
+                    key=f"caption_{group.id}",
+                )
+                # if group.webhook_footer_img:
+                #     st.image(group.webhook_footer_img, width=80, caption="Current footer image")
+
+            # last updated timestamp
+            if getattr(group, "updated_at", None):
+                st.caption(f"Last updated: {group.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+            if st.button("Save group settings", key=f"save_group_{group.id}"):
+                group.name = new_name.strip()
+                group.webhook_footer = new_footer.strip()
+                group.color = new_color.strip() or None
+                group.webhook_footer_img = new_img.strip() or None
+                group.caption = new_caption.strip() or None
+                session.commit()
+                st.rerun()
+
+        #Services and Markdowns
+        st.markdown(f"<h2 style='margin-bottom:0'>{group.name}</h2>", unsafe_allow_html=True)
+        st.markdown("#### Services:")
+
+        # sort links for this group by service name (A→Z)
+        sorted_links = sorted(
+            group.group_services,
+            key=lambda gs: gs.service.name.lower()
+        )
+
+        # for gs in group.group_services:
+        for i, gs in enumerate(sorted_links):
+            # 4 columns: name | status | toggle | webhook update stuff
+            cols = st.columns([1, 1, 1, 3, 0.6])
+
+            #Service name
+            with cols[0]:
+                st.markdown(f"**{gs.service.name}**")
+                if gs.webhook_updated_at:
                     st.markdown(
-                        f"<span style='font-size:13px;color:#666'>Webhook for <b>{gs.service.name}</b>:</span>",
+                        f"<span style='font-size:13px;color:#999'>Last updated: "
+                        f"{gs.webhook_updated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}</span>",
                         unsafe_allow_html=True,
                     )
+            #Enable Button
+            with cols[1]:
+                st.markdown("🟢" if gs.enabled else "🔴")
+                st.markdown("Enabled" if gs.enabled else "Disabled")
+                if gs.status_changed_at:
+                    st.markdown(
+                        f"<span style='font-size:11px;color:#999'>"
+                        f"Last change: {gs.status_changed_at.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                        f"</span>",
+                        unsafe_allow_html=True,
+                    )
+            #Disable Button
+            with cols[2]:
+                toggle_txt = "Disable" if gs.enabled else "Enable"
+                if st.button(toggle_txt, key=f"toggle_{group.id}_{gs.service.id}_{gs.enabled}"):
+                    gs.enabled = not gs.enabled
+                    gs.status_changed_at = datetime.utcnow()
+                    session.commit()
+                    st.rerun()
+            #Updating Section
+            with cols[3]:
+                st.markdown(
+                    f"<span style='font-size:13px;color:#666'>Webhook for <b>{gs.service.name}</b>:</span>",
+                    unsafe_allow_html=True,
+                )
 
-                    pending_key = f"pending_webhook_{group.id}_{gs.service.id}"
+                pending_key = f"pending_webhook_{group.id}_{gs.service.id}"
 
-                    confirm_key = f"confirm_clear_{group.id}_{gs.service.id}"
+                confirm_key = f"confirm_clear_{group.id}_{gs.service.id}"
 
-                    with st.form(key=f"webhook_form_{group.id}_{gs.service.id}"):
-                        updated_url = st.text_input(
-                            "Webhook URL",
-                            value=gs.webhook_url or "",
-                            label_visibility="collapsed",
-                            placeholder="https://discord.com/api/webhooks/...",
-                        )
+                with st.form(key=f"webhook_form_{group.id}_{gs.service.id}"):
+                    updated_url = st.text_input(
+                        "Webhook URL",
+                        value=gs.webhook_url or "",
+                        label_visibility="collapsed",
+                        placeholder="https://discord.com/api/webhooks/...",
+                    )
 
-                        col_u, col_r = st.columns([2, 2])
-                        with col_u:
-                            update_clicked = st.form_submit_button("Update Webhook")
-                        with col_r:
-                            remove_clicked = st.form_submit_button("Remove webhook")
+                    col_u, col_r = st.columns([2, 2])
+                    with col_u:
+                        update_clicked = st.form_submit_button("Update Webhook")
+                    with col_r:
+                        remove_clicked = st.form_submit_button("Remove webhook")
 
-                        # Handle update
-                        if update_clicked:
-                            st.session_state[pending_key] = updated_url
+                    # Handle update
+                    if update_clicked:
+                        st.session_state[pending_key] = updated_url
 
-                        # Handle remove with double confirmation
-                        if remove_clicked:
-                            if not st.session_state.get(confirm_key, False):
-                                st.session_state[confirm_key] = True
-                                st.warning("Click 'Remove webhook' again to confirm.")
-                            else:
-                                gs.webhook_url = None
-                                gs.health_status = "unconfigured"  # or your chosen state
-                                gs.webhook_updated_at = None
-                                session.commit()
-                                st.success("Webhook removed.")
-                                st.session_state[confirm_key] = False
+                    # Handle remove with double confirmation
+                    if remove_clicked:
+                        if not st.session_state.get(confirm_key, False):
+                            st.session_state[confirm_key] = True
+                            st.warning("Click 'Remove webhook' again to confirm.")
+                        else:
+                            gs.webhook_url = None
+                            gs.health_status = "unconfigured"  # or your chosen state
+                            gs.webhook_updated_at = None
+                            session.commit()
+                            st.success("Webhook removed.")
+                            st.session_state[confirm_key] = False
 
-                    # If there is a pending change, show confirmation UI
-                    if pending_key in st.session_state and st.session_state[pending_key]:
-                        st.warning(
-                            f"Confirm changing webhook for {gs.service.name} to:\n"
-                            f"{st.session_state[pending_key]}"
-                        )
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("Confirm change", key=f"confirm_{group.id}_{gs.service.id}"):
-                                new_url = st.session_state[pending_key].strip()
-
-                                try:
-                                    resp = requests.get(new_url, timeout=5)
-                                    code = resp.status_code
-
-                                    if 200 <= code < 300:
-                                        # valid -> save to DB and mark health
-                                        gs.webhook_url = new_url
-                                        gs.webhook_updated_at = datetime.utcnow()
-                                        gs.health_status = "ok"
-                                        gs.health_code = code
-                                        gs.health_checked_at = datetime.utcnow()
-
-                                        session.commit()
-                                        st.session_state[pending_key] = ""
-                                        st.success(f"Webhook updated and looks valid (HTTP {code}).")
-                                        st.rerun()
-                                    elif code in (401, 404):
-                                        st.error(
-                                            f"Discord returned {code}: webhook appears invalid or deleted. Not saved.")
-                                    else:
-                                        st.error(f"Discord returned HTTP {code}. Not saving this URL.")
-                                except Exception:
-                                    st.error("Error reaching Discord; webhook not saved.")
-
-                        with c2:
-                            if st.button("Cancel", key=f"cancel_{group.id}_{gs.service.id}"):
-                                st.session_state[pending_key] = ""
-
-                # delete this service from this group
-                with cols[4]:
-                    confirm_key = f"confirm_delete_link_{group.id}_{gs.service.id}"
-
-                    if st.button("🗑️", key=f"delete_link_{group.id}_{gs.service.id}"):
-                        st.session_state[confirm_key] = True
-
-                if st.session_state.get(confirm_key):
-                    st.warning("Remove this service from this group?")
+                # If there is a pending change, show confirmation UI
+                if pending_key in st.session_state and st.session_state[pending_key]:
+                    st.warning(
+                        f"Confirm changing webhook for {gs.service.name} to:\n"
+                        f"{st.session_state[pending_key]}"
+                    )
                     c1, c2 = st.columns(2)
                     with c1:
-                        if st.button("Yes, delete", key=f"yes_{confirm_key}"):
-                            session.delete(gs)
-                            session.commit()
-                            st.session_state[confirm_key] = False
-                            st.rerun()
+                        if st.button("Confirm change", key=f"confirm_{group.id}_{gs.service.id}"):
+                            new_url = st.session_state[pending_key].strip()
+
+                            try:
+                                resp = requests.get(new_url, timeout=5)
+                                code = resp.status_code
+
+                                if 200 <= code < 300:
+                                    # valid -> save to DB and mark health
+                                    gs.webhook_url = new_url
+                                    gs.webhook_updated_at = datetime.utcnow()
+                                    gs.health_status = "ok"
+                                    gs.health_code = code
+                                    gs.health_checked_at = datetime.utcnow()
+
+                                    session.commit()
+                                    st.session_state[pending_key] = ""
+                                    st.success(f"Webhook updated and looks valid (HTTP {code}).")
+                                    st.rerun()
+                                elif code in (401, 404):
+                                    st.error(
+                                        f"Discord returned {code}: webhook appears invalid or deleted. Not saved.")
+                                else:
+                                    st.error(f"Discord returned HTTP {code}. Not saving this URL.")
+                            except Exception:
+                                st.error("Error reaching Discord; webhook not saved.")
+
                     with c2:
-                        if st.button("Cancel", key=f"no_{confirm_key}"):
-                            st.session_state[confirm_key] = False
+                        if st.button("Cancel", key=f"cancel_{group.id}_{gs.service.id}"):
+                            st.session_state[pending_key] = ""
+
+            # delete this service from this group
+            with cols[4]:
+                confirm_key = f"confirm_delete_link_{group.id}_{gs.service.id}"
+
+                if st.button("🗑️", key=f"delete_link_{group.id}_{gs.service.id}"):
+                    st.session_state[confirm_key] = True
+
+            if st.session_state.get(confirm_key):
+                st.warning("Remove this service from this group?")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Yes, delete", key=f"yes_{confirm_key}"):
+                        session.delete(gs)
+                        session.commit()
+                        st.session_state[confirm_key] = False
+                        st.rerun()
+                with c2:
+                    if st.button("Cancel", key=f"no_{confirm_key}"):
+                        st.session_state[confirm_key] = False
 
 # .venv\Scripts\Activate
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-# $env:DATABASE_URL="postgresql://webhook_config_user:bw5bj1AQ2AuBMf59bhRS5NvPQm3MmAcm@dpg-d4lmlsje5dus73fstta0-a.oregon-postgres.render.com/webhook_config"
 # streamlit run home.py
 # broken url = 'https://discord.com/api/webhooks/1444080766140022814/pEKP8d0-Vh1zydGTl9Idz375b8D1hpDgzFyv6x9lHX4I2_m072FQLBKIpruz46FrMTKS'
 
