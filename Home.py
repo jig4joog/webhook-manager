@@ -227,6 +227,7 @@ session = SessionLocal()
 st.title("Discord Webhook Manager")
 
 def load_and_display_groups():
+    st.markdown("<a id='top'></a>", unsafe_allow_html=True)  # Anchor for the button
 
     health_check_button()
     # 1. Fetch ALL Services and their links in one go
@@ -764,6 +765,38 @@ def load_and_display_groups():
                 with c2:
                     if st.button("Cancel", key=f"no_{confirm_key}"):
                         st.session_state[confirm_key] = False
+
+    # Add the "Back to Top" button at the end of the page rendering
+    st.markdown("""
+        <style>
+            .back-to-top {
+                position: fixed;
+                bottom: 25px;
+                right: 25px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background-color: #313336;
+                color: white;
+                padding: 10px;
+                font-size: 18px;
+                border-radius: 50%;
+                text-decoration: none;
+                z-index: 1000;
+                border: 2px solid #fff;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                transition: background-color 0.3s, transform 0.2s;
+            }
+            .back-to-top:hover {
+                background-color: #4f545c;
+                color: white;
+                transform: scale(1.1);
+            }
+        </style>
+        <a href="#top" class="back-to-top" title="Back to Top">
+            ⬆️
+        </a>
+    """, unsafe_allow_html=True)
 
 # .venv\Scripts\Activate
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
