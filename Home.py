@@ -311,31 +311,86 @@ def load_and_display_groups():
                 )
 
             with right:
-                b_col1, b_col2 = st.columns(2)
-                with b_col1:
-                    confirm_key = f"confirm_delete_service_links_{svc.id}"
+                # three tight buttons: Remove links | Enable/Disable all | Delete service (admin)
+                btn1, btn2, btn3 = st.columns([1, 1, 1])
+                # Remove all links (existing behavior)
+                with btn1:
+                    confirm_key_links = f"confirm_delete_service_links_{svc.id}"
                     if st.button("Remove links", key=f"delete_service_links_{svc.id}"):
-                        st.session_state[confirm_key] = True
+                        st.session_state[confirm_key_links] = True
                 
+                # Toggle enable/disable across all groups for this service
+                toggle_key = f"confirm_toggle_service_{svc.id}"
+                toggle_label = "Disable all" if enabled_links else "Enable all"
+                with btn2:
+                    if st.button(toggle_label, key=f"toggle_service_{svc.id}"):
+                        st.session_state[toggle_key] = True
+
+                # Delete service (admin)
                 if show_tools:
-                    with b_col2:
+                    with btn3:
                         confirm_key_service = f"confirm_delete_service_{svc.id}"
                         if st.button("Delete Service", key=f"delete_service_{svc.id}"):
                             st.session_state[confirm_key_service] = True
 
-            if st.session_state.get(confirm_key):
+            # Confirmation for Remove links
+            if st.session_state.get(f"confirm_delete_service_links_{svc.id}"):
                 st.warning(f"Remove **all links** for {svc.name}? This detaches it from every group.")
                 c1, c2 = st.columns(2)
                 with c1:
-                    if st.button("Yes, delete all", key=f"yes_{confirm_key}"):
+                    if st.button("Yes, delete all", key=f"yes_confirm_delete_links_{svc.id}"):
                         for gs in list(svc.group_services):
                             session.delete(gs)
                         session.commit()
-                        st.session_state[confirm_key] = False
+                        st.session_state[f"confirm_delete_service_links_{svc.id}"] = False
                         st.rerun()
                 with c2:
-                    if st.button("Cancel", key=f"no_{confirm_key}"):
-                        st.session_state[confirm_key] = False
+                    if st.button("Cancel", key=f"no_confirm_delete_links_{svc.id}"):
+                        st.session_state[f"confirm_delete_service_links_{svc.id}"] = False
+                        st.rerun()
+
+            # Confirmation & execution for Toggle enable/disable service across all groups
+            if st.session_state.get(toggle_key):
+                action = "disable" if enabled_links else "enable"
+                st.warning(f"⚠️ Are you sure you want to {action.upper()} '{svc.name}' for ALL groups?")
+                c_yes, c_no = st.columns(2)
+                with c_yes:
+                    if st.button("Yes, do it", key=f"yes_toggle_{svc.id}"):
+                        now = datetime.utcnow()
+                        created = 0
+                        updated = 0
+                        if enabled_links:
+                            # Disable existing links
+                            for gs in list(svc.group_services):
+                                if gs.enabled:
+                                    gs.enabled = False
+                                    gs.status_changed_at = now
+                                    updated += 1
+                        else:
+                            # Enable existing links and create missing links for groups
+                            all_groups = session.query(Group).all()
+                            existing_by_group = {gs.group_id: gs for gs in list(svc.group_services)}
+                            for g in all_groups:
+                                if g.id in existing_by_group:
+                                    gs = existing_by_group[g.id]
+                                    if not gs.enabled:
+                                        gs.enabled = True
+                                        gs.status_changed_at = now
+                                        updated += 1
+                                else:
+                                    new_link = GroupService(group_id=g.id, service_id=svc.id, enabled=True, status_changed_at=now)
+                                    session.add(new_link)
+                                    created += 1
+
+                        if created or updated:
+                            session.commit()
+                        st.session_state[toggle_key] = False
+                        st.toast(f"{svc.name} {'disabled' if enabled_links else 'enabled'} for all groups "
+                                 f"({created} created, {updated} updated)" if (created or updated) else "No changes made.")
+                        st.rerun()
+                with c_no:
+                    if st.button("Cancel", key=f"no_toggle_{svc.id}"):
+                        st.session_state[toggle_key] = False
                         st.rerun()
 
             if show_tools:
