@@ -320,10 +320,13 @@ def load_and_display_groups():
                         st.session_state[confirm_key_links] = True
                 
                 # Toggle enable/disable across all groups for this service
+                links_with_webhooks = [gs for gs in svc.group_services if gs.webhook_url]
+                is_any_target_enabled = any(gs.enabled for gs in links_with_webhooks)
+
                 toggle_key = f"confirm_toggle_service_{svc.id}"
-                toggle_label = "Disable all" if enabled_links else "Enable all"
+                toggle_label = "Disable hooks" if is_any_target_enabled else "Enable hooks"
                 with btn2:
-                    if st.button(toggle_label, key=f"toggle_service_{svc.id}"):
+                    if st.button(toggle_label, key=f"toggle_service_{svc.id}", help="Only affects groups with a webhook URL for this service."):
                         st.session_state[toggle_key] = True
 
                 # Delete service (admin)
@@ -351,42 +354,30 @@ def load_and_display_groups():
 
             # Confirmation & execution for Toggle enable/disable service across all groups
             if st.session_state.get(toggle_key):
-                action = "disable" if enabled_links else "enable"
-                st.warning(f"⚠️ Are you sure you want to {action.upper()} '{svc.name}' for ALL groups?")
+                links_with_webhooks = [gs for gs in svc.group_services if gs.webhook_url]
+                is_any_target_enabled = any(gs.enabled for gs in links_with_webhooks)
+                action = "disable" if is_any_target_enabled else "enable"
+
+                st.warning(f"⚠️ Are you sure you want to **{action.upper()}** '{svc.name}' for the **{len(links_with_webhooks)}** groups that have a webhook configured?")
                 c_yes, c_no = st.columns(2)
                 with c_yes:
                     if st.button("Yes, do it", key=f"yes_toggle_{svc.id}"):
                         now = datetime.utcnow()
-                        created = 0
                         updated = 0
-                        if enabled_links:
-                            # Disable existing links
-                            for gs in list(svc.group_services):
-                                if gs.enabled:
-                                    gs.enabled = False
-                                    gs.status_changed_at = now
-                                    updated += 1
-                        else:
-                            # Enable existing links and create missing links for groups
-                            all_groups = session.query(Group).all()
-                            existing_by_group = {gs.group_id: gs for gs in list(svc.group_services)}
-                            for g in all_groups:
-                                if g.id in existing_by_group:
-                                    gs = existing_by_group[g.id]
-                                    if not gs.enabled:
-                                        gs.enabled = True
-                                        gs.status_changed_at = now
-                                        updated += 1
-                                else:
-                                    new_link = GroupService(group_id=g.id, service_id=svc.id, enabled=True, status_changed_at=now)
-                                    session.add(new_link)
-                                    created += 1
-
-                        if created or updated:
+                        target_state = not is_any_target_enabled
+                        
+                        for gs in links_with_webhooks:
+                            if gs.enabled != target_state:
+                                gs.enabled = target_state
+                                gs.status_changed_at = now
+                                updated += 1
+                        
+                        if updated > 0:
                             session.commit()
+                        
                         st.session_state[toggle_key] = False
-                        st.toast(f"{svc.name} {'disabled' if enabled_links else 'enabled'} for all groups "
-                                 f"({created} created, {updated} updated)" if (created or updated) else "No changes made.")
+                        toast_msg = f"{updated} link(s) for '{svc.name}' were {action}d." if updated > 0 else "No changes were needed."
+                        st.toast(toast_msg)
                         st.rerun()
                 with c_no:
                     if st.button("Cancel", key=f"no_toggle_{svc.id}"):
