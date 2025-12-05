@@ -8,7 +8,7 @@ import requests
 app = FastAPI()
 
 # Get the URL from Render's Environment Variables (we set this later)
-DISCORD_WEBHOOK_URL = os.environ.get("https://discord.com/api/webhooks/1446386612287307950/S18tLKv4vlH9Vo19VoTYvu9nLr2AJANTDTKw39byiFWmi5V_j67mwMM8RygrXJ6Ho4HM")
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 def send_discord_alert(data):
     if not DISCORD_WEBHOOK_URL:
